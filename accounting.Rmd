@@ -1,0 +1,61 @@
+---
+params:
+  client_name: Acme
+  start_date: ''
+  end_date: ''
+  fetch_new: FALSE
+fig_height: 3
+fig_width: 5
+output:
+  html_document:
+    pandoc_args: [
+      "+RTS", "-K16000m",
+      "-RTS"
+    ]
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: yeti
+---
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, comment = NA, error= FALSE, cache = F}
+# No scientific notation
+options(scipen=999)
+
+library(tidyverse)
+library(gsheet)
+# Basic knitr options
+opts_chunk$set(comment = NA, 
+               echo = FALSE, 
+               warning = FALSE, 
+               message = FALSE, 
+               error = TRUE, 
+               cache = FALSE)
+```
+
+```{r}
+# Specify paramaters
+for (i in 1:length(params)){
+  assign(names(params)[i],
+         params[[i]],
+         env = .GlobalEnv)
+}
+
+creation_date <- as.Date(Sys.Date())
+```
+
+```{r}
+file_name <- paste0(creation_date, '.RData')
+
+if(file_name %in% dir('backups') & !fetch_new){
+  load(paste0('backups/', file_name))
+} else {
+  # Get accounting data
+  expenses <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit?usp=sharing', sheetid = '')
+  income <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=684913063')
+  hours <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=565858805')
+  save(expenses, income, hours,
+       file = paste0('backups/', file_name))
+}
+```
