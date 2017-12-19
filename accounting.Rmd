@@ -15,7 +15,7 @@ output:
 params <- list(client_name = '',
   start_date = '',
   end_date = '',
-  fetch_new = FALSE,
+  fetch_new = TRUE,
   hourly_rate = 20)
   
 # No scientific notation
@@ -26,7 +26,6 @@ library(tidyverse)
 library(gsheet)
 library(DT)
 library(tidyr)
-library(databrew)
 library(ggthemes)
 # Basic knitr options
 opts_chunk$set(comment = NA, 
@@ -74,16 +73,16 @@ if(!has_end_date){
   end_date <- as.Date(end_date)
 }
 
-if(file_name %in% dir('backups') & !fetch_new){
-  load(paste0('backups/', file_name))
-} else {
+# if(file_name %in% dir('backups') & !fetch_new){
+#   load(paste0('backups/', file_name))
+# } else {
   # Get accounting data
   expenses <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit?usp=sharing', sheetid = '')
   income <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=684913063')
   hours <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=565858805')
-  save(expenses, income, hours,
-       file = paste0('backups/', file_name))
-}
+#   save(expenses, income, hours,
+#        file = paste0('backups/', file_name))
+# }
 expenses$date <- as.Date(expenses$date, format = '%m/%d/%Y')
 hours$date <- as.Date(hours$date, format = '%m/%d/%Y')
 income$date <- as.Date(income$date, format = '%m/%d/%Y')
