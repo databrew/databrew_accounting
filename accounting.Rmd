@@ -27,6 +27,7 @@ library(gsheet)
 library(DT)
 library(tidyr)
 library(databrew)
+library(ggthemes)
 # Basic knitr options
 opts_chunk$set(comment = NA, 
                echo = FALSE, 
@@ -127,6 +128,8 @@ out_data <- hours %>%
 DT::datatable(out_data)
 ```
 
+# Databrew internal accounting {.tabset .tabset-fade .tabset-pills}
+
 
 ```{r, eval = no_client, results = 'asis'}
 x <- expenses %>%
@@ -146,7 +149,7 @@ x <- left_join(data_frame(date = seq(min(x$date),
   arrange(date) %>%
   tidyr::fill(balance, .direction = 'down')
 current_balance <- dplyr::last(x$balance)
-cat(paste0('## Expenses to revenue over time'))
+cat(paste0('## Expenses to revenue over time '))
 ```
 
 ```{r, eval = no_client}
@@ -156,7 +159,7 @@ ggplot(data = x,
   geom_step() +
   geom_hline(yintercept = 0, col = 'black',
              lty = 3, alpha = 0.6) +
-  theme_databrew() +
+  theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Balance',
        title = paste0('Current balance: ', round(current_balance, digits = 2), ' USD'))
@@ -191,7 +194,7 @@ ggplot(data = x,
            y = cum_hours,
            color = name)) +
   geom_line() +
-  theme_databrew() +
+  theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Cumulative hours',
        title = 'Hours worked',
@@ -199,6 +202,19 @@ ggplot(data = x,
   scale_color_manual(name = '',
                      values = cols)
 ```
+
+
+```{r, eval = no_client}
+DT::datatable(x)
+```
+
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('## Wages and reimbursements paid / owed\n\n'))
+cat(paste0('This section is under construction.'))
+```
+
+
 
 ```{r, eval = no_client, results = 'asis'}
 cat(paste0('## Appendix: raw data '))
