@@ -1,17 +1,9 @@
 ---
-params:
-  client_name: Acme
-  start_date: ''
-  end_date: ''
-  fetch_new: FALSE
+runtime: shiny
 fig_height: 3
 fig_width: 5
 output:
   html_document:
-    pandoc_args: [
-      "+RTS", "-K16000m",
-      "-RTS"
-    ]
     toc: true
     toc_float:
       collapsed: true
@@ -20,11 +12,21 @@ output:
 ---
 
 ```{r, echo = FALSE, warning = FALSE, message = FALSE, comment = NA, error= FALSE, cache = F}
+params <- list(client_name = '',
+  start_date = '',
+  end_date = '',
+  fetch_new = FALSE,
+  hourly_rate = 20)
+  
 # No scientific notation
 options(scipen=999)
-
+library(Quandl)
+library(knitr)
 library(tidyverse)
 library(gsheet)
+library(DT)
+library(tidyr)
+library(databrew)
 # Basic knitr options
 opts_chunk$set(comment = NA, 
                echo = FALSE, 
@@ -47,6 +49,29 @@ creation_date <- as.Date(Sys.Date())
 
 ```{r}
 file_name <- paste0(creation_date, '.RData')
+has <- function(x){
+  out <- FALSE
+  if(!is.null(x)){
+    if(x != ''){
+      out <- TRUE
+    }
+  }
+  return(out)
+}
+has_client_name <- has(client_name)
+no_client <- !has_client_name
+has_start_date <- has(start_date)
+has_end_date <- has(end_date)
+if(!has_start_date){
+  start_date <- as.Date('2015-01-01')
+} else{
+  start_date <- as.Date(start_date)
+}
+if(!has_end_date){
+  end_date <- as.Date(Sys.Date())
+} else {
+  end_date <- as.Date(end_date)
+}
 
 if(file_name %in% dir('backups') & !fetch_new){
   load(paste0('backups/', file_name))
@@ -58,4 +83,148 @@ if(file_name %in% dir('backups') & !fetch_new){
   save(expenses, income, hours,
        file = paste0('backups/', file_name))
 }
+expenses$date <- as.Date(expenses$date, format = '%m/%d/%Y')
+hours$date <- as.Date(hours$date, format = '%m/%d/%Y')
+income$date <- as.Date(income$date, format = '%m/%d/%Y')
+
+# Get currency data
+currency <- Quandl("BOE/XUDLCDD", 
+                   api_key="dRx5HohjAeCyjfTMxtz4")
+names(currency) <- c('date', 'usd_to_cad')
+# Expand out to sys date if needed
+currency <- left_join(data_frame(date = seq(min(currency$date),
+                                 Sys.Date(),
+                                 by = 1)),
+                      currency) 
+currency <- currency %>% arrange(date) %>%
+  tidyr::fill(usd_to_cad, .direction = 'down')
+# Create usd columns
+expenses <-
+  left_join(expenses, currency,
+            by = 'date') %>%
+  mutate(usd = ifelse(currency == 'CAD',
+                      amount / usd_to_cad,
+                      amount))
+income <- left_join(income, currency,
+                    by = 'date') %>%
+  mutate(usd = ifelse(currency == 'CAD',
+                      amount / usd_to_cad,
+                      amount))
+```
+
+```{r, eval = has_client_name, results = 'asis'}
+cat(paste0('## Billable hours '))
+```
+
+```{r, eval = has_client_name}
+# Show only billable hours to a client
+out_data <- hours %>%
+  filter(client == client_name) %>%
+  filter(billable_to_client) %>%
+  dplyr::select(date, name, total_hours, brief_description) %>%
+  filter(date >= begin_date) %>%
+  filter(date <= end_date)
+DT::datatable(out_data)
+```
+
+
+```{r, eval = no_client, results = 'asis'}
+x <- expenses %>%
+  dplyr::select(date, usd, item) %>%
+  mutate(usd = -1 * usd) %>%
+  bind_rows(
+    income %>%
+      dplyr::select(date, usd)
+  ) %>%
+  arrange(date) %>%
+  mutate(balance = cumsum(usd))
+x <- left_join(data_frame(date = seq(min(x$date),
+                                     Sys.Date(),
+                                     by = 1)),
+               x,
+               by = 'date') %>%
+  arrange(date) %>%
+  tidyr::fill(balance, .direction = 'down')
+current_balance <- dplyr::last(x$balance)
+cat(paste0('## Expenses to revenue over time'))
+```
+
+```{r, eval = no_client}
+ggplot(data = x,
+       aes(x = date,
+           y = balance)) +
+  geom_step() +
+  geom_hline(yintercept = 0, col = 'black',
+             lty = 3, alpha = 0.6) +
+  theme_databrew() +
+  labs(x = 'Date',
+       y = 'Balance',
+       title = paste0('Current balance: ', round(current_balance, digits = 2), ' USD'))
+```
+
+
+```{r, eval = no_client}
+DT::datatable(x %>% filter(!is.na(usd)) %>%
+                mutate(usd = round(usd, digits = 2),
+                       balance = round(balance, digits = 2)))
+```
+
+
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('## Databrew hours over time '))
+```
+
+```{r, eval = no_client}
+x <- hours %>%
+  group_by(date, name) %>%
+  summarise(hours = sum(total_hours)) %>%
+  ungroup %>%
+  arrange(date) %>%
+  group_by(name) %>%
+  mutate(cum_hours = cumsum(hours)) %>%
+  ungroup
+
+cols <- colorRampPalette(RColorBrewer::brewer.pal(n = 8, 'Set1'))(length(unique(x$name)))
+ggplot(data = x,
+       aes(x = date,
+           y = cum_hours,
+           color = name)) +
+  geom_line() +
+  theme_databrew() +
+  labs(x = 'Date',
+       y = 'Cumulative hours',
+       title = 'Hours worked',
+       subtitle = 'Not including those directly paid to worker') +
+  scale_color_manual(name = '',
+                     values = cols)
+```
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('## Appendix: raw data '))
+```
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('### Expenses: raw data '))
+```
+
+```{r, eval = no_client}
+DT::datatable(expenses)
+```
+
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('### Hours: raw data '))
+```
+
+```{r, eval = no_client}
+DT::datatable(hours)
+```
+
+```{r, eval = no_client, results = 'asis'}
+cat(paste0('### Income: raw data '))
+```
+
+```{r, eval = no_client}
+DT::datatable(income)
 ```
