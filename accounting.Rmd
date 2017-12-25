@@ -77,16 +77,22 @@ if(!has_end_date){
 #   load(paste0('backups/', file_name))
 # } else {
   # Get accounting data
-  expenses <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit?usp=sharing', sheetid = '')
+  expenses <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=0')
   income <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=684913063')
   hours <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=565858805')
+  wages_paid <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=1319225983')
 #   save(expenses, income, hours,
 #        file = paste0('backups/', file_name))
 # }
 expenses$date <- as.Date(expenses$date, format = '%m/%d/%Y')
 hours$date <- as.Date(hours$date, format = '%m/%d/%Y')
 income$date <- as.Date(income$date, format = '%m/%d/%Y')
-
+wages_paid$date <- as.Date(wages_paid$date, format = '%m/%d/%Y')
+# Make all data frames
+expenses <- data.frame(expenses)
+hours <- data.frame(hours)
+income <- data.frame(income)
+wages_paid <- data.frame(wages_paid)
 # Get currency data
 currency <- Quandl("BOE/XUDLCDD", 
                    api_key="dRx5HohjAeCyjfTMxtz4")
@@ -110,22 +116,13 @@ income <- left_join(income, currency,
   mutate(usd = ifelse(currency == 'CAD',
                       amount / usd_to_cad,
                       amount))
+wages_paid <- left_join(wages_paid, currency,
+                         by = 'date') %>%
+  mutate(usd = ifelse(currency == 'CAD',
+                      amount / usd_to_cad,
+                      amount))
 ```
 
-```{r, eval = has_client_name, results = 'asis'}
-cat(paste0('## Billable hours '))
-```
-
-```{r, eval = has_client_name}
-# Show only billable hours to a client
-out_data <- hours %>%
-  filter(client == client_name) %>%
-  filter(billable_to_client) %>%
-  dplyr::select(date, name, total_hours, brief_description) %>%
-  filter(date >= begin_date) %>%
-  filter(date <= end_date)
-DT::datatable(out_data)
-```
 
 # Databrew internal accounting {.tabset .tabset-fade .tabset-pills}
 
@@ -155,13 +152,14 @@ cat(paste0('## Expenses to revenue over time '))
 ggplot(data = x,
        aes(x = date,
            y = balance)) +
-  geom_step() +
+  geom_step(alpha = 0.7) +
   geom_hline(yintercept = 0, col = 'black',
              lty = 3, alpha = 0.6) +
   theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Balance',
-       title = paste0('Current balance: ', round(current_balance, digits = 2), ' USD'))
+       title = paste0('Current balance: ', round(current_balance, digits = 2), ' USD'),
+       subtitle = '(Ignores hours worked)')
 ```
 
 
@@ -187,12 +185,12 @@ x <- hours %>%
   mutate(cum_hours = cumsum(hours)) %>%
   ungroup
 
-cols <- colorRampPalette(RColorBrewer::brewer.pal(n = 8, 'Set1'))(length(unique(x$name)))
+cols <- colorRampPalette(RColorBrewer::brewer.pal(n = 8, 'Spectral'))(length(unique(x$name)))
 ggplot(data = x,
        aes(x = date,
            y = cum_hours,
            color = name)) +
-  geom_line() +
+  geom_line(alpha = 1, size = 1) +
   theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Cumulative hours',
@@ -210,10 +208,47 @@ DT::datatable(x)
 
 ```{r, eval = no_client, results = 'asis'}
 cat(paste0('## Wages and reimbursements paid / owed\n\n'))
-cat(paste0('This section is under construction.'))
 ```
 
+```{r, eval = no_client}
+names_df <- data.frame(name = sort(unique(hours$name)))
+# Get all hours worked which have not yet been paid
+hours_money <-
+  hours %>%
+  filter(!paid_to_worker) %>%
+  group_by(name) %>%
+  summarise(total_hours = sum(total_hours))
+hours_money <- left_join(names_df, hours_money) %>% mutate(total_hours = ifelse(is.na(total_hours), 0, total_hours))
+# Get all expenditures by any person which have not yet been reimbursed
+ex_money <- expenses %>%
+  filter(!reimbursed) %>%
+  group_by(name = payment_by) %>%
+  summarise(total_ex = sum(usd))
+ex_money <- left_join(names_df, ex_money) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
+# Get total income paid to any one person which should have been collective
+in_money <- income %>%
+  group_by(name = paid_to) %>%
+  summarise(total_in = sum(usd))
+in_money <- left_join(names_df, in_money) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
+# Get wages paid and not yet reimbursed
+out_wages <- wages_paid %>%
+  group_by(name) %>%
+  summarise(wages_paid = sum(usd))
+out_wages <- left_join(names_df, out_wages) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
 
+# Join all together
+together <- left_join(hours_money, ex_money) %>% left_join(in_money) %>% left_join(out_wages)
+# Convert hours to usd
+wage <- 20
+together$wages_owed <- (together$total_hours * wage)
+
+# Calculate current balance
+together <-
+  together %>%
+  mutate(balance = wages_owed - wages_paid + total_ex - total_in)
+
+DT::datatable(together)
+```
 
 ```{r, eval = no_client, results = 'asis'}
 cat(paste0('## Appendix: raw data '))
