@@ -127,7 +127,7 @@ wages_paid <- left_join(wages_paid, currency,
 # Databrew internal accounting {.tabset .tabset-fade .tabset-pills}
 
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 x <- expenses %>%
   dplyr::select(date, usd, item) %>%
   mutate(usd = -1 * usd) %>%
@@ -148,7 +148,7 @@ current_balance <- dplyr::last(x$balance)
 cat(paste0('## Expenses to revenue over time '))
 ```
 
-```{r, eval = no_client}
+```{r}
 ggplot(data = x,
        aes(x = date,
            y = balance)) +
@@ -163,7 +163,7 @@ ggplot(data = x,
 ```
 
 
-```{r, eval = no_client}
+```{r}
 DT::datatable(x %>% filter(!is.na(usd)) %>%
                 mutate(usd = round(usd, digits = 2),
                        balance = round(balance, digits = 2)))
@@ -171,11 +171,11 @@ DT::datatable(x %>% filter(!is.na(usd)) %>%
 
 
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 cat(paste0('## Databrew hours over time '))
 ```
 
-```{r, eval = no_client}
+```{r}
 x <- hours %>%
   group_by(date, name) %>%
   summarise(hours = sum(total_hours)) %>%
@@ -201,16 +201,22 @@ ggplot(data = x,
 ```
 
 
-```{r, eval = no_client}
+```{r}
 DT::datatable(x)
 ```
 
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 cat(paste0('## Wages and reimbursements paid / owed\n\n'))
 ```
 
-```{r, eval = no_client}
+```{r}
+inputPanel(
+  sliderInput('wage', 'Hourly wage (USD)',
+              min = 5, max = 100,
+              value = 20, step = 1)
+)
+
 names_df <- data.frame(name = sort(unique(hours$name)))
 # Get all hours worked which have not yet been paid
 hours_money <-
@@ -238,43 +244,94 @@ out_wages <- left_join(names_df, out_wages) %>% mutate(wages_paid = ifelse(is.na
 
 # Join all together
 together <- left_join(hours_money, ex_money) %>% left_join(in_money) %>% left_join(out_wages)
+# Round all columns
+together <- together %>%
+  mutate(total_hours = round(total_hours, digits = 2),
+         total_ex = round(total_ex, digits = 2),
+         total_in = round(total_in, digits = 2),
+         wages_paid = round(wages_paid, digits = 2)) %>%
+  rename(expenditures_absorbed = total_ex,
+         income_absorbed = total_in)
 # Convert hours to usd
-wage <- 20
-together$wages_owed <- (together$total_hours * wage)
+together_reactive <- reactive({
+  x <- together
+  wage <- input$wage
+  x$wages_earned <- (x$total_hours * wage)
 
 # Calculate current balance
-together <-
-  together %>%
-  mutate(balance = wages_owed - wages_paid + total_ex - total_in)
-
-DT::datatable(together)
+  x %>%
+  mutate(balance = wages_earned - wages_paid + expenditures_absorbed - income_absorbed)
+})
 ```
 
-```{r, eval = no_client, results = 'asis'}
+
+### Collective status (ie, balance after wages)
+
+<large>
+<strong>
+
+```{r}
+renderText({
+  x <- together_reactive()
+  x <- x %>%
+    summarise(balance = sum(balance)) %>%
+    mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black'))) %>%
+    .$balance
+})
+```
+
+</large>
+</strong>
+
+### Individual status (ie, paycheck report)
+
+```{r}
+renderPlot({
+  x <- together_reactive()
+  ggplot(data = x,
+         aes(x = name,
+             y = balance)) +
+    geom_bar(stat = 'identity',
+             fill = 'darkblue',
+             alpha = 0.6) +
+    geom_label(aes(label = balance)) +
+    theme_fivethirtyeight() +
+    labs(x = 'Who',
+         y = 'USD')
+})
+
+DT::renderDataTable({
+  x <- together_reactive()
+  DT::datatable(x)
+})
+```
+
+
+```{r, results = 'asis'}
 cat(paste0('## Appendix: raw data '))
 ```
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 cat(paste0('### Expenses: raw data '))
 ```
 
-```{r, eval = no_client}
+```{r}
 DT::datatable(expenses)
 ```
 
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 cat(paste0('### Hours: raw data '))
 ```
 
-```{r, eval = no_client}
+```{r}
 DT::datatable(hours)
 ```
 
-```{r, eval = no_client, results = 'asis'}
+```{r, results = 'asis'}
 cat(paste0('### Income: raw data '))
 ```
 
-```{r, eval = no_client}
+```{r}
 DT::datatable(income)
 ```
