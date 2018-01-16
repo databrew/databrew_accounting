@@ -1,0 +1,163 @@
+---
+title: "Invoice"
+output: 
+  html_document:
+    theme: united
+    highlight: tango
+params:
+  client: World Bank
+  show_amount: FALSE
+  wage: 50
+  start_date: ''
+  end_date: ''
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+# Define knitr options
+knitr::opts_chunk$set(comment = NA, 
+               echo = FALSE, 
+               warning = FALSE, 
+               message = FALSE, 
+               error = TRUE, 
+               cache = FALSE,
+               fig.height = 3,
+               fig.width = 5,
+               fig.align = 'center')
+# Specify paramaters
+for (i in 1:length(params)){
+  assign(names(params)[i],
+         params[[i]],
+         env = .GlobalEnv)
+}
+
+
+```
+
+```{r}
+library(googlesheets)
+library(dplyr)
+library(databrew)
+library(wordcloud2)
+# library(rCharts)
+library(printr)
+library(ggplot2)
+library(RColorBrewer)
+hours <- gs_url('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM')
+hours <- gs_read_csv(hours)
+hours$date <- as.Date(hours$date, format = '%m/%d/%Y')
+
+# Filter for client
+hours <- hours %>% 
+  filter(client == params$client)
+
+# Keep only billable hours
+hours <- hours %>%
+  filter(billable_to_client)
+
+# Clean up start/end date
+if(!is.null(start_date)){
+  if(start_date == ''){
+    start_date <- min(hours$date)
+  }
+}
+if(!is.null(end_date)){
+  if(end_date == ''){
+    end_date <- min(hours$date)
+  }
+}
+```
+
+## Period: `r start_date` through `r end_date`
+
+### Overview
+
+```{r}
+x <- hours %>%
+  summarise(start_date = min(date),
+            end_date = max(date),
+            hours = sum(total_hours)) %>%
+  mutate(daily_average = round(hours / (1 + as.numeric(end_date - start_date)), digits = 2))
+if(params$show_amount){
+  x$amount <- params$wage * x$hours
+}
+names(x) <- Hmisc::capitalize(gsub('_', ' ', names(x)))
+DT::datatable(x,
+              options = list(dom = 't'))
+```
+
+### Visualizations
+
+#### Topics worked on 
+
+```{r}
+x <- paste0(hours$brief_description, collapse = ' ')
+x <- databrew::prepare_for_word_cloud(x)
+x <- x %>%
+  filter(! word %in% c('with', 'to', 'of', 'on', 're', 'etc', 'from'))
+wordcloud2::wordcloud2(data = x,
+                       fontFamily = 'Lato',
+                       color = 'random-light')
+```
+
+
+#### Hours by day and project
+
+```{r, fig.width = 7}
+x <- hours %>%
+  group_by(date, project) %>%
+  summarise(hours = sum(total_hours))
+x <- left_join(
+  expand.grid(date = seq(min(x$date),
+                        max(x$date),
+                        by = 1),
+              project = sort(unique(x$project))),
+  x
+) %>%
+  mutate(hours = ifelse(is.na(hours), 0, hours)) %>%
+  arrange(date) %>%
+  group_by(project) %>%
+  mutate(cumulative_hours = cumsum(hours))
+  # mutate(date = as.character(date))
+
+cols <- colorRampPalette(brewer.pal(n = 9, 'Spectral'))(length(unique(x$project)))
+g1 <- ggplot(data = x,
+       aes(x = date,
+           y = hours,
+           group = project,
+           fill = project)) +
+  geom_bar(stat = 'identity',
+           position = 'dodge',
+           alpha = 0.6) +
+  scale_fill_manual(name = '',
+                    values = cols) +
+  theme_databrew() +
+  labs(x = 'Date',
+       y = 'Hours',
+       title = 'Hours by date')
+g2 <- ggplot(data = x,
+             aes(x = date,
+                 y = cumulative_hours,
+                 group = project,
+                 color = project)) +
+  geom_line() +
+  scale_color_manual(name = '',
+                     values = cols) +
+  theme_databrew() +
+  labs(x = 'Date',
+       y = 'Hours',
+       title = 'Cumulative hours by date')
+Rmisc::multiplot(g1, g2, cols = 2)
+```
+
+### Details
+
+```{r}
+x <- hours %>%
+                group_by(date, total_hours,
+                              project, client) %>%
+  summarise(brief_description = paste0(unique(brief_description), collapse = ';'))
+names(x) <- Hmisc::capitalize(gsub('_', ' ', names(x)))
+DT::datatable(x)
+```
