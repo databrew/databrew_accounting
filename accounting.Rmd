@@ -1,19 +1,17 @@
 ---
-runtime: shiny
 fig_height: 3
 fig_width: 5
 output:
   html_document:
     theme: yeti
+params:
+  hourly_rate: 20
+  start_date: ''
+  end_date: ''
+  fetch_new: TRUE
 ---
 
 ```{r, echo = FALSE, warning = FALSE, message = FALSE, comment = NA, error= FALSE, cache = F}
-params <- list(client_name = '',
-  start_date = '',
-  end_date = '',
-  fetch_new = TRUE,
-  hourly_rate = 20)
-  
 # No scientific notation
 options(scipen=999)
 library(Quandl)
@@ -54,8 +52,7 @@ has <- function(x){
   }
   return(out)
 }
-has_client_name <- has(client_name)
-no_client <- !has_client_name
+
 has_start_date <- has(start_date)
 has_end_date <- has(end_date)
 if(!has_start_date){
@@ -119,18 +116,35 @@ wages_paid <- left_join(wages_paid, currency,
                       amount))
 ```
 
+```{r, results = 'hide'}
+# Get amount in Canadian bank
+source('accounting_get_bank_data.R')
+bank <- get_cad()
 
-# Databrew internal accounting {.tabset .tabset-fade .tabset-pills}
+# Convert to usd
+bank$cad <- bank$value
+bank <- left_join(bank, currency)
+bank$usd <- bank$cad / bank$usd_to_cad
+bank$usd_to_cad <- NULL
+bank <- bank %>% arrange(date)
+# {.tabset .tabset-fade .tabset-pills}
+```
 
+
+# Databrew internal accounting 
+
+
+## Non-wage expenses over time
 
 ```{r, results = 'asis'}
+# Get all expenditures
 x <- expenses %>%
   dplyr::select(date, usd, item) %>%
-  mutate(usd = -1 * usd) %>%
-  bind_rows(
-    income %>%
-      dplyr::select(date, usd)
-  ) %>%
+  # mutate(usd = -1 * usd) %>%
+  # bind_rows(
+  #   income %>%
+  #     dplyr::select(date, usd)
+  # ) %>%
   arrange(date) %>%
   mutate(balance = cumsum(usd))
 x <- left_join(data_frame(date = seq(min(x$date),
@@ -138,13 +152,10 @@ x <- left_join(data_frame(date = seq(min(x$date),
                                      by = 1)),
                x,
                by = 'date') %>%
-  arrange(date) %>%
+  arrange(date)
+x <- x %>%
   tidyr::fill(balance, .direction = 'down')
-current_balance <- dplyr::last(x$balance)
-cat(paste0('## Expenses to revenue over time '))
-```
 
-```{r}
 ggplot(data = x,
        aes(x = date,
            y = balance)) +
@@ -154,22 +165,26 @@ ggplot(data = x,
   theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Balance',
-       title = paste0('Current balance: ', round(current_balance, digits = 2), ' USD'),
-       subtitle = '(Ignores hours worked)')
+       title = paste0('All expenses: ', round(dplyr::last(x$balance)), ' USD'),
+       subtitle = '(Ignores hours worked and income)')
 ```
 
 
-```{r}
+```{r, eval = FALSE}
 DT::datatable(x %>% filter(!is.na(usd)) %>%
                 mutate(usd = round(usd, digits = 2),
                        balance = round(balance, digits = 2)))
 ```
 
+## Ledger balance
 
-
-```{r, results = 'asis'}
-cat(paste0('## Databrew hours over time '))
+```{r}
+current_balance <- dplyr::last(x$balance) + bank$usd
 ```
+
+Our current balance in the bank is `r round(dplyr::last(bank$cad))` CAD (`r round(dplyr::last(bank$usd))` USD).
+
+## Hours worked over time 
 
 ```{r}
 x <- hours %>%
@@ -191,29 +206,19 @@ ggplot(data = x,
   labs(x = 'Date',
        y = 'Cumulative hours',
        title = 'Hours worked',
-       subtitle = 'Not including those directly paid to worker') +
+       subtitle = 'Not including "non-shared" hours (ie, Xing\'s work for YouthRex)') +
   scale_color_manual(name = '',
                      values = cols)
 ```
 
-
-```{r}
+```{r, eval = FALSE}
 DT::datatable(x)
 ```
 
-
-```{r, results = 'asis'}
-cat(paste0('## Wages and reimbursements paid / owed\n\n'))
-```
+## Wages and reimbursements paid / owed
 
 ```{r}
-inputPanel(
-  sliderInput('wage', 'Hourly wage (USD)',
-              min = 5, max = 100,
-              value = 20, step = 1)
-)
-
-names_df <- data.frame(name = sort(unique(hours$name)))
+names_df <- data.frame(name = c(sort(unique(hours$name))))
 # Get all hours worked which have not yet been paid
 hours_money <-
   hours %>%
@@ -248,58 +253,56 @@ together <- together %>%
          wages_paid = round(wages_paid, digits = 2)) %>%
   rename(expenditures_absorbed = total_ex,
          income_absorbed = total_in)
+
 # Convert hours to usd
-together_reactive <- reactive({
-  x <- together
-  wage <- input$wage
-  x$wages_earned <- (x$total_hours * wage)
+x <- together
+wage <- params$hourly_rate
+x$wages_earned <- (x$total_hours * wage)
 
 # Calculate current balance
-  x %>%
+together_reactive <-  x %>%
   mutate(balance = wages_earned - wages_paid + expenditures_absorbed - income_absorbed)
-})
 ```
-
 
 ### Collective status (ie, balance after wages)
 
 <large>
 <strong>
 
-```{r}
-renderText({
-  x <- together_reactive()
-  x <- x %>%
-    summarise(balance = sum(balance)) %>%
-    mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black'))) %>%
-    .$balance
-})
+```{r, results = 'asis'}
+bank_val <- round(dplyr::last(bank$usd), digits = 2)
+x <- together_reactive
+x <- x %>%
+  summarise(balance = sum(balance)) %>%
+  mutate(balance_numeric = balance) %>%
+  mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black')))  %>%
+  mutate(balance_bank = balance_numeric - bank_val) %>%
+  mutate(balance_bank_text = paste0(balance_bank, ifelse(balance_bank > 0, ' in the red', ' in the black')))
+
+cat(paste0('Not counting money in the bank, paying wages will make us ', x$balance, '.'))
+cat(paste0('But, we have ', bank_val, ' USD in the bank.'))
+cat(paste0('If we empty the bank account in wages, we are ', x$balance_bank_text, '.'))
 ```
 
 </large>
 </strong>
 
-### Individual status (ie, paycheck report)
+### How much employees are owed
 
 ```{r}
-renderPlot({
-  x <- together_reactive()
-  ggplot(data = x,
-         aes(x = name,
-             y = balance)) +
-    geom_bar(stat = 'identity',
-             fill = 'darkblue',
-             alpha = 0.6) +
-    geom_label(aes(label = balance)) +
-    theme_fivethirtyeight() +
-    labs(x = 'Who',
-         y = 'USD')
-})
+x <- together_reactive
+ggplot(data = x,
+       aes(x = name,
+           y = balance)) +
+  geom_bar(stat = 'identity',
+           fill = 'darkblue',
+           alpha = 0.6) +
+  geom_label(aes(label = balance)) +
+  theme_fivethirtyeight() +
+  labs(x = 'Who',
+       y = 'USD')
 
-DT::renderDataTable({
-  x <- together_reactive()
-  DT::datatable(x)
-})
+DT::datatable(together_reactive)
 ```
 
 

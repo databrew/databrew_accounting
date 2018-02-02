@@ -64,7 +64,7 @@ if(!is.null(start_date)){
 }
 if(!is.null(end_date)){
   if(end_date == ''){
-    end_date <- min(hours$date)
+    end_date <- max(hours$date)
   }
 }
 ```
