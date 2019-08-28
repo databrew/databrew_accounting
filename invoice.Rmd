@@ -1,5 +1,5 @@
 ---
-title: "Invoice"
+title: "IFC World Bank Summary"
 output: 
   html_document:
     theme: united
@@ -8,8 +8,8 @@ params:
   client: World Bank
   show_amount: FALSE
   wage: 50
-  start_date: ''
-  end_date: ''
+  start_date: '2018-03-22'
+  end_date: '2018-04-19'
 ---
 
 
@@ -38,7 +38,7 @@ for (i in 1:length(params)){
 ```{r}
 library(googlesheets)
 library(dplyr)
-library(databrew)
+# library(databrew)
 library(wordcloud2)
 # library(rCharts)
 library(printr)
@@ -67,6 +67,11 @@ if(!is.null(end_date)){
     end_date <- max(hours$date)
   }
 }
+
+# Remove periods outside of start and end
+hours <- hours %>%
+  filter(date >= start_date,
+         date <= end_date)
 ```
 
 ## Period: `r start_date` through `r end_date`
@@ -92,8 +97,30 @@ DT::datatable(x,
 #### Topics worked on 
 
 ```{r}
+prepare_for_word_cloud <- function(x){
+  # Clean x
+  x <- tolower(x)
+  x <- gsub("([.-])|[[:punct:]]", "", x)
+  x <- x[!is.na(x)]
+  # Parse x
+  x_parsed <- strsplit(x, ' ')
+  # unlist
+  x <- unlist(x_parsed)
+  # Remove a, for, the
+  x <- x[! x %in% c('a', 'for', 'the', 'and')]
+  # Make dataframe
+  x <- data_frame(word = x)
+  # Get counts
+  x <- x %>%
+    group_by(word) %>%
+    summarise(freq = n()) %>%
+    arrange(desc(freq))
+  x <- data.frame(x)
+  row.names(x) <- x$word
+  return(x)
+}
 x <- paste0(hours$brief_description, collapse = ' ')
-x <- databrew::prepare_for_word_cloud(x)
+x <- prepare_for_word_cloud(x)
 x <- x %>%
   filter(! word %in% c('with', 'to', 'of', 'on', 're', 'etc', 'from'))
 wordcloud2::wordcloud2(data = x,
@@ -132,7 +159,7 @@ g1 <- ggplot(data = x,
            alpha = 0.6) +
   scale_fill_manual(name = '',
                     values = cols) +
-  theme_databrew() +
+  ggthemes::theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Hours',
        title = 'Hours by date')
@@ -144,11 +171,19 @@ g2 <- ggplot(data = x,
   geom_line() +
   scale_color_manual(name = '',
                      values = cols) +
-  theme_databrew() +
+  ggthemes::theme_fivethirtyeight() +
   labs(x = 'Date',
        y = 'Hours',
        title = 'Cumulative hours by date')
 Rmisc::multiplot(g1, g2, cols = 2)
+```
+
+```{r}
+x %>%
+  group_by(project) %>%
+  summarise(hours = sum(hours)) %>%
+  ungroup %>%
+  mutate(days = hours / 8)
 ```
 
 ### Details

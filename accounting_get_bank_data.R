@@ -12,12 +12,18 @@ get_cad <- function(){
     credentials <- yaml.load_file('credentials.yaml')
     
     # start a chrome browser
-    rD <- rsDriver()
-    remDr <- rD[["client"]]
-    # remDr <- remoteDriver(browserName = "phantomjs")
-    # remDr$open()
+    # (first run install_chromedriver.sh)
+    system('sudo docker run -d -p 4445:4444 selenium/standalone-chrome')
     
-    # navigate to strava
+    remDr <- remoteDriver(remoteServerAddr = "localhost", port = 4445L, browserName = "chrome")
+    
+    # rD <- rsDriver()
+    # remDr <- rD[["client"]]
+    # remDr <- remoteDriver(browserName = "phantomjs")
+    # iconv <- base::iconv
+    
+    remDr$open()
+    # navigate to royal bank
     remDr$navigate("https://www1.royalbank.com/cgi-bin/rbaccess/rbcgi3m01?F6=1&F7=IB&F21=IB&F22=IB&REQUEST=ClientSignin&LANGUAGE=ENGLISH&_ga=2.44854951.2041350902.1517547498-877209576.1517547498")
     
     # Identify where to enter user/pass and submit button
@@ -40,30 +46,38 @@ get_cad <- function(){
                                   ifelse(grepl('nephew', question),
                                          'nephew',
                                          NA)))
-    
+
     # Identify answer field
     answer_field <- remDr$findElement(using = 'xpath', '//*[(@id = "pvqAnswer")]')
-    
+
     # Provide an answer
     answer_field$sendKeysToElement(list(credentials[[question_key]]))
-    
+
     # Identify and click the "continue" button
     continue <- remDr$findElement(using = 'xpath', '//*[(@id = "id_btn_continue")]')
     continue$clickElement()
+    # 
     
     # Find value
     cad <- remDr$findElements(using = 'xpath', '//*[contains(concat( " ", @class, " " ), concat( " ", "m3dtht", " " ))]')
-    caddy <- cad[[length(cad)]]
-    value <- caddy$getElementText()
-    value <- unlist(value)
+    lc <- length(cad)
+    cad_list <- list()
+    for(i in 1:lc){
+      cad_list[[i]] <- cad[[i]]$getElementText()
+    }
+    cad_list <- unlist(cad_list)
+    which_total <- which(grepl('Total', cad_list))
+    which_values <- which_total + 2
+    value <- cad_list[which_values]
     value <- gsub(',', '', value)
     value <- as.numeric(value)
+    value <- sum(value, na.rm = TRUE)
     value_df <- data.frame(date = Sys.Date(),
                            value = value)
     
     remDr$close()
     # stop the selenium server
-    rD[["server"]]$stop()
+    # rD[["server"]]$stop()
   })
   
   # Read older data

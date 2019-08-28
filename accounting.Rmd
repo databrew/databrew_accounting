@@ -5,10 +5,14 @@ output:
   html_document:
     theme: yeti
 params:
-  hourly_rate: 20
+  hourly_rate: 15
+  client_hourly_rate: 30
+  new_hourly_rate: 20
+  new_client_hourly_rate: 40
   start_date: ''
   end_date: ''
   fetch_new: TRUE
+  old_bank: TRUE
 ---
 
 ```{r, echo = FALSE, warning = FALSE, message = FALSE, comment = NA, error= FALSE, cache = F}
@@ -73,6 +77,8 @@ if(!has_end_date){
   expenses <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=0')
   income <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=684913063')
   hours <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=565858805')
+  hours2019 <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=335157130')
+  hours <- bind_rows(hours, hours2019)
   wages_paid <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1RABWgak2e2i2blu1tLUmbNHagJGrh7MPbivuXB2TCDM/edit#gid=1319225983')
 #   save(expenses, income, hours,
 #        file = paste0('backups/', file_name))
@@ -114,12 +120,31 @@ wages_paid <- left_join(wages_paid, currency,
   mutate(usd = ifelse(currency == 'CAD',
                       amount / usd_to_cad,
                       amount))
+
+x = hours %>%
+  mutate(status = ifelse(high_priority, 'External', 'Internal')) %>%
+  group_by(status, name) %>%
+  summarise(hours = sum(total_hours)) %>%
+  ungroup
+# ggplot(data = x,
+#        aes(x = name,
+#            y = hours,
+#            group = status,
+#            fill = status)) +
+#   geom_bar(stat = 'identity',
+#            position = 'dodge') +
+#   databrew::theme_databrew()
 ```
 
 ```{r, results = 'hide'}
 # Get amount in Canadian bank
 source('accounting_get_bank_data.R')
-bank <- get_cad()
+if(old_bank){
+  bank <- read_csv('data/bank_value.csv')
+} else {
+  bank <- get_cad()
+}
+
 
 # Convert to usd
 bank$cad <- bank$value
@@ -139,6 +164,8 @@ bank <- bank %>% arrange(date)
 ```{r, results = 'asis'}
 # Get all expenditures
 x <- expenses %>%
+  filter(!is.na(reimbursed)) %>%
+  filter(!reimbursed) %>%
   dplyr::select(date, usd, item) %>%
   # mutate(usd = -1 * usd) %>%
   # bind_rows(
@@ -176,13 +203,120 @@ DT::datatable(x %>% filter(!is.na(usd)) %>%
                        balance = round(balance, digits = 2)))
 ```
 
-## Ledger balance
+## Bank balance
 
 ```{r}
 current_balance <- dplyr::last(x$balance) + bank$usd
 ```
 
 Our current balance in the bank is `r round(dplyr::last(bank$cad))` CAD (`r round(dplyr::last(bank$usd))` USD).
+
+
+
+```{r}
+# Define date of changing to increased wages
+change_date <- as.Date('2019-07-01')
+names_df <- data.frame(name = c(sort(unique(hours$name))))
+# Get all hours worked which have not yet been paid
+hours_money <-
+  hours %>%
+  # filter(!paid_to_worker) %>%
+  group_by(name) %>%
+  summarise(total_hours_old = sum(total_hours[date < change_date]),
+            total_hours_new = sum(total_hours[date >= change_date]))
+hours_money_client <-
+  hours %>%
+  filter(billable_to_client) %>%
+  group_by(name) %>%
+  summarise(total_hours_client_old = sum(total_hours[date < change_date]),
+            total_hours_client_new = sum(total_hours[date >= change_date]))
+hours_money <- left_join(x = hours_money,
+                         y = hours_money_client,
+                         by = 'name')
+hours_money <- left_join(names_df, hours_money) %>% 
+  mutate(total_hours_old = ifelse(is.na(total_hours_old), 0, total_hours_old),
+         total_hours_new = ifelse(is.na(total_hours_new), 0, total_hours_new),
+         total_hours_client_old = ifelse(is.na(total_hours_client_old), 0, total_hours_client_old),
+         total_hours_client_new = ifelse(is.na(total_hours_client_new), 0, total_hours_client_new))
+hours_money <- hours_money %>%
+  mutate(total_hours = total_hours_old + total_hours_new,
+         total_hours_client = total_hours_client_old + total_hours_client_new) %>%
+  mutate(percent_client = total_hours_client / total_hours * 100) %>%
+  mutate(total_hours_internal = total_hours - total_hours_client) %>%
+  mutate(total_hours_internal_new = total_hours_new - total_hours_client_new,
+         total_hours_internal_old = total_hours_old - total_hours_client_old)
+
+# Get all expenditures by any person which have not yet been reimbursed
+ex_money <- expenses %>%
+  filter(!reimbursed) %>%
+  group_by(name = payment_by) %>%
+  summarise(total_ex = sum(usd))
+ex_money <- left_join(names_df, ex_money) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
+# Get total income paid to any one person which should have been collective
+in_money <- income %>%
+  group_by(name = paid_to) %>%
+  summarise(total_in = sum(usd))
+in_money <- left_join(names_df, in_money) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
+# Get wages paid and not yet reimbursed
+out_wages <- wages_paid %>%
+  group_by(name) %>%
+  summarise(wages_paid = sum(usd))
+out_wages <- left_join(names_df, out_wages) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
+
+# Join all together
+together <- left_join(hours_money, ex_money) %>% left_join(in_money) %>% left_join(out_wages)
+# Round all columns
+together <- together %>%
+  mutate(total_hours = round(total_hours, digits = 2),
+         total_ex = round(total_ex, digits = 2),
+         total_in = round(total_in, digits = 2),
+         wages_paid = round(wages_paid, digits = 2)) %>%
+  rename(expenditures_absorbed = total_ex,
+         income_absorbed = total_in)
+
+# Convert hours to usd
+x <- together
+wage <- params$hourly_rate
+new_wage <- params$new_hourly_rate
+client_wage <- params$client_hourly_rate
+new_client_wage <- params$new_client_hourly_rate
+x <- x %>%
+  mutate(wages_earned = 
+           (total_hours_client_new * new_client_wage) +
+           (total_hours_client_old * client_wage) +
+           (total_hours_internal_new * new_wage) +
+           (total_hours_internal_old * wage))
+
+
+
+# Calculate current balance
+together_reactive <-  x %>%
+  mutate(balance = wages_earned - wages_paid + expenditures_absorbed - income_absorbed)
+```
+
+### Overall balance (ie, balance after wages)
+
+<large>
+<strong>
+
+```{r, results = 'asis'}
+bank_val <- round(dplyr::last(bank$usd), digits = 2)
+x <- together_reactive
+x <- x %>%
+  summarise(balance = sum(balance)) %>%
+  mutate(balance_numeric = balance) %>%
+  mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black')))  %>%
+  mutate(balance_bank = balance_numeric - bank_val) %>%
+  mutate(balance_bank_text = paste0(abs(balance_bank), ifelse(balance_bank > 0, ' in the red', ' in the black')))
+
+cat(paste0('Not counting money in the bank, paying wages will make us ', x$balance, '.'))
+cat(paste0('But, we have ', bank_val, ' USD in the bank.'))
+cat(paste0('If we empty the bank account in wages, we are ', x$balance_bank_text, '.'))
+```
+
+</large>
+</strong>
+
 
 ## Hours worked over time 
 
@@ -215,78 +349,6 @@ ggplot(data = x,
 DT::datatable(x)
 ```
 
-## Wages and reimbursements paid / owed
-
-```{r}
-names_df <- data.frame(name = c(sort(unique(hours$name))))
-# Get all hours worked which have not yet been paid
-hours_money <-
-  hours %>%
-  filter(!paid_to_worker) %>%
-  group_by(name) %>%
-  summarise(total_hours = sum(total_hours))
-hours_money <- left_join(names_df, hours_money) %>% mutate(total_hours = ifelse(is.na(total_hours), 0, total_hours))
-# Get all expenditures by any person which have not yet been reimbursed
-ex_money <- expenses %>%
-  filter(!reimbursed) %>%
-  group_by(name = payment_by) %>%
-  summarise(total_ex = sum(usd))
-ex_money <- left_join(names_df, ex_money) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
-# Get total income paid to any one person which should have been collective
-in_money <- income %>%
-  group_by(name = paid_to) %>%
-  summarise(total_in = sum(usd))
-in_money <- left_join(names_df, in_money) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
-# Get wages paid and not yet reimbursed
-out_wages <- wages_paid %>%
-  group_by(name) %>%
-  summarise(wages_paid = sum(usd))
-out_wages <- left_join(names_df, out_wages) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
-
-# Join all together
-together <- left_join(hours_money, ex_money) %>% left_join(in_money) %>% left_join(out_wages)
-# Round all columns
-together <- together %>%
-  mutate(total_hours = round(total_hours, digits = 2),
-         total_ex = round(total_ex, digits = 2),
-         total_in = round(total_in, digits = 2),
-         wages_paid = round(wages_paid, digits = 2)) %>%
-  rename(expenditures_absorbed = total_ex,
-         income_absorbed = total_in)
-
-# Convert hours to usd
-x <- together
-wage <- params$hourly_rate
-x$wages_earned <- (x$total_hours * wage)
-
-# Calculate current balance
-together_reactive <-  x %>%
-  mutate(balance = wages_earned - wages_paid + expenditures_absorbed - income_absorbed)
-```
-
-### Collective status (ie, balance after wages)
-
-<large>
-<strong>
-
-```{r, results = 'asis'}
-bank_val <- round(dplyr::last(bank$usd), digits = 2)
-x <- together_reactive
-x <- x %>%
-  summarise(balance = sum(balance)) %>%
-  mutate(balance_numeric = balance) %>%
-  mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black')))  %>%
-  mutate(balance_bank = balance_numeric - bank_val) %>%
-  mutate(balance_bank_text = paste0(balance_bank, ifelse(balance_bank > 0, ' in the red', ' in the black')))
-
-cat(paste0('Not counting money in the bank, paying wages will make us ', x$balance, '.'))
-cat(paste0('But, we have ', bank_val, ' USD in the bank.'))
-cat(paste0('If we empty the bank account in wages, we are ', x$balance_bank_text, '.'))
-```
-
-</large>
-</strong>
-
 ### How much employees are owed
 
 ```{r}
@@ -297,12 +359,13 @@ ggplot(data = x,
   geom_bar(stat = 'identity',
            fill = 'darkblue',
            alpha = 0.6) +
-  geom_label(aes(label = balance)) +
+  geom_label(aes(label = round(balance))) +
   theme_fivethirtyeight() +
   labs(x = 'Who',
        y = 'USD')
 
-DT::datatable(together_reactive)
+# DT::datatable(together_reactive)
+databrew::prettify(together_reactive)
 ```
 
 
