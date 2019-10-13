@@ -675,7 +675,7 @@ databrew::prettify(z)
 
 # Year-specific totals
 
-The below shows totals, _per year_. All values are USD. Note that values are only included within the period date range (`r params$start_date` through `r params$end_date`). Also note that the following spouses are absorbed into their partner's totals: Coloma (Joe), Xing (Ben):
+The below shows totals, _per year_. Values are USD (in parenthesis: CAD). Note that values are only included within the period date range (`r params$start_date` through `r params$end_date`). Also note that the following spouses are absorbed into their partner's totals: Coloma (Joe), Xing (Ben):
 
 
 ```{r}
@@ -730,7 +730,7 @@ databrew::prettify(show, nrows = nrow(show))
 
 # Pre-post LLC totals
 
-The below shows totals, broken down by the period pre LLC (prior to Feb 25 2019) and the period post LLC (Feb 25 2019 and beyond).. All values are USD. Note that values are only included within the period date range (`r params$start_date` through `r params$end_date`):
+The below shows totals, broken down by the period pre LLC (prior to Feb 25 2019) and the period post LLC (Feb 25 2019 and beyond). Values are USD (in parenthesis: CAD). Note that values are only included within the period date range (`r params$start_date` through `r params$end_date`):
 
 
 
