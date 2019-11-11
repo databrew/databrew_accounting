@@ -10,7 +10,7 @@ params:
   new_hourly_rate: 20
   new_client_hourly_rate: 40
   start_date: '2016-01-01'
-  end_date: '2019-09-30'
+  end_date: '2019-02-24'
   fetch_new: TRUE
 ---
 
@@ -94,7 +94,6 @@ hours <- data.frame(hours)
 income <- data.frame(income)
 wages_paid <- data.frame(wages_paid)
 
-# Filter for dates
 date_restrict <- function(x){
   x %>% filter(date >= start_date, date <= end_date)
 }
@@ -102,7 +101,6 @@ expenses <- date_restrict(expenses)
 hours <- date_restrict(hours)
 income <- date_restrict(income)
 wages_paid <- date_restrict(wages_paid)
-
 
 # Get currency data
 credentials <- yaml.load_file('credentials.yaml')
@@ -135,10 +133,6 @@ expenses <-
                       ifelse(currency == 'EUR',
                              amount / usd_to_eur,
                              amount)))
-
-# Remove the parts already reimbursed
-expenses <- expenses %>% filter(!reimbursed)
-
 income <- left_join(income, currency,
                     by = 'date') %>%
   mutate(usd = ifelse(currency == 'CAD',
@@ -157,7 +151,7 @@ wages_paid <- left_join(wages_paid, currency,
 x = hours %>%
   mutate(status = ifelse(high_priority, 'External', 'Internal')) %>%
   group_by(status, name) %>%
-  summarise(hours = sum(total_hours, na.rm = TRUE)) %>%
+  summarise(hours = sum(total_hours)) %>%
   ungroup
 # ggplot(data = x,
 #        aes(x = name,
@@ -184,7 +178,7 @@ detailed_bank <- bank
 # Combine the two banks together and sum
 bank <- bank %>%
   group_by(date) %>%
-  summarise(usd = sum(usd, na.rm = TRUE)) %>%
+  summarise(usd = sum(usd)) %>%
   ungroup
 
 bank <- bank %>% arrange(date)
@@ -206,6 +200,7 @@ bank <- bank %>% arrange(date)
 # The below shows the cumulative total of expenses incurred over time (hardware purchase, domains, licensing, server hosting, laptops, etc.)
 # Get all expenditures
 x <- expenses %>%
+  filter(date >= start_date, date <= end_date) %>%
   filter(!is.na(reimbursed)) %>%
   filter(!reimbursed) %>%
   dplyr::select(date, usd, item) %>%
@@ -243,35 +238,6 @@ x <- x %>%
 ```
 
 
-## Bank balance
-
-```{r}
-bank_details <- detailed_bank %>%
-  filter(date == max(date))
-```
-
-Our current bank balance is:
-
-- `r bank_details$value[bank_details$currency == 'CAD']` CAD in our Canadian bank account (the equivalent of `r round(bank_details$usd[bank_details$currency == 'CAD'], digits = 2)`)
-- `r bank_details$value[bank_details$currency == 'USD']` USD in our USA bank account.
-- That is a total of **`r round(sum(bank_details$usd, na.rm = TRUE), digits = 2)`** USD.
-
-
-```{r}
-ggplot(data = bank_details,
-       aes(x = currency,
-           y = usd)) +
-  geom_bar(stat = 'identity') +
-    theme_fivethirtyeight() +
-  geom_text(aes(label = round(usd, digits = 2)),
-            nudge_y = 3000,
-            size = 6) +
-  labs(title = 'Current totals in bank (converted to USD)',
-       subtitle = paste0('Combined total: ', round(sum(bank_details$usd, na.rm = TRUE)), ' USD'),
-       caption = paste0('USD = Campus Credit Union; CAD = Royal Bank of Canada. Actual amount in latter is ', bank_details$value[bank_details$currency == 'CAD'], ' CAD.'))
-```
-
-
 ```{r}
 # Define date of changing to increased wages
 change_date <- as.Date('2019-07-01')
@@ -288,6 +254,11 @@ expenses$llc <- ifelse(expenses$date >= '2019-02-25', 'After Feb 25 2019','Befor
 income$llc <- ifelse(income$date >= '2019-02-25', 'After Feb 25 2019','Before Feb 25 2019')
 wages_paid$llc <- ifelse(wages_paid$date >= '2019-02-25', 'After Feb 25 2019','Before Feb 25 2019')
 
+# Filter
+hours <- hours %>% filter(date >= start_date, date <= end_date)
+expenses <- expenses %>% filter(date >= start_date, date <= end_date)
+income <- income %>% filter(date >= start_date, date <= end_date)
+wages_paid <- wages_paid %>% filter(date >= start_date, date <= end_date)
 # Overwrite names (absorbing spouses)
 hours <- hours %>% mutate(name = ifelse(name == 'Xing', 'Ben',
                        ifelse(name == 'Coloma',
@@ -313,14 +284,14 @@ hours_money <-
   hours %>%
   # filter(!paid_to_worker) %>%
   group_by(name) %>%
-  summarise(total_hours_old = sum(total_hours[date < change_date], na.rm = TRUE),
-            total_hours_new = sum(total_hours[date >= change_date], na.rm = TRUE))
+  summarise(total_hours_old = sum(total_hours[date < change_date]),
+            total_hours_new = sum(total_hours[date >= change_date]))
 hours_money_client <-
   hours %>%
   filter(billable_to_client) %>%
   group_by(name) %>%
-  summarise(total_hours_client_old = sum(total_hours[date < change_date], na.rm = TRUE),
-            total_hours_client_new = sum(total_hours[date >= change_date], na.rm = TRUE))
+  summarise(total_hours_client_old = sum(total_hours[date < change_date]),
+            total_hours_client_new = sum(total_hours[date >= change_date]))
 hours_money <- left_join(x = hours_money,
                          y = hours_money_client,
                          by = 'name')
@@ -342,18 +313,18 @@ hours_money_year <-
   hours %>%
   # filter(!paid_to_worker) %>%
   group_by(name, year) %>%
-  summarise(total_hours_old = sum(total_hours[date < change_date], na.rm = TRUE),
-            total_hours_new = sum(total_hours[date >= change_date], na.rm = TRUE))
+  summarise(total_hours_old = sum(total_hours[date < change_date]),
+            total_hours_new = sum(total_hours[date >= change_date]))
 hours_money_client_year <-
   hours %>%
   filter(billable_to_client) %>%
   group_by(name, year) %>%
-  summarise(total_hours_client_old = sum(total_hours[date < change_date], na.rm = TRUE),
-            total_hours_client_new = sum(total_hours[date >= change_date], na.rm = TRUE))
+  summarise(total_hours_client_old = sum(total_hours[date < change_date]),
+            total_hours_client_new = sum(total_hours[date >= change_date]))
 hours_money_year <- left_join(x = hours_money_year,
                          y = hours_money_client_year,
                          by = c('name', 'year'))
-left_year <- left <- expand.grid(year = sort(unique(hours_money_year$year)),
+left <- expand.grid(year = sort(unique(hours_money_year$year)),
                     name = sort(unique(names_df$name)))
 hours_money_year <- left_join(left, hours_money_year) %>% 
   mutate(total_hours_old = ifelse(is.na(total_hours_old), 0, total_hours_old),
@@ -379,8 +350,8 @@ hours_money_client_llc <-
   hours %>%
   filter(billable_to_client) %>%
   group_by(name, llc) %>%
-  summarise(total_hours_client_old = sum(total_hours[date < change_date], na.rm = TRUE),
-            total_hours_client_new = sum(total_hours[date >= change_date], na.rm = TRUE))
+  summarise(total_hours_client_old = sum(total_hours[date < change_date]),
+            total_hours_client_new = sum(total_hours[date >= change_date]))
 hours_money_llc <- left_join(x = hours_money_llc,
                          y = hours_money_client_llc,
                          by = c('name', 'llc'))
@@ -405,57 +376,57 @@ hours_money_llc <- hours_money_llc %>%
 ex_money <- expenses %>%
   filter(!reimbursed) %>%
   group_by(name = payment_by) %>%
-  summarise(total_ex = sum(usd, na.rm = TRUE))
+  summarise(total_ex = sum(usd))
 ex_money <- left_join(names_df, ex_money) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
 
 # Get all expenditures by any person which have not yet been reimbursed BY YEAR
 ex_money_year <- expenses %>%
   filter(!reimbursed) %>%
   group_by(name = payment_by, year) %>%
-  summarise(total_ex = sum(usd, na.rm = TRUE))
+  summarise(total_ex = sum(usd))
 ex_money_year <- left_join(left, ex_money_year) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
 
 # Get all expenditures by any person which have not yet been reimbursed pre/post LLC
 ex_money_llc <- expenses %>%
   filter(!reimbursed) %>%
   group_by(name = payment_by, llc) %>%
-  summarise(total_ex = sum(usd, na.rm = TRUE))
+  summarise(total_ex = sum(usd))
 ex_money_llc <- left_join(left_llc, ex_money_llc) %>% mutate(total_ex = ifelse(is.na(total_ex), 0, total_ex))
 
 # Get total income paid to any one person which should have been collective
 in_money <- income %>%
   group_by(name = paid_to) %>%
-  summarise(total_in = sum(usd, na.rm = TRUE))
+  summarise(total_in = sum(usd))
 in_money <- left_join(names_df, in_money) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
 
 # Get total income paid to any one person which should have been collective BY YEAR
 in_money_year <- income %>%
   group_by(name = paid_to, year) %>%
-  summarise(total_in = sum(usd, na.rm = TRUE))
+  summarise(total_in = sum(usd))
 in_money_year <- left_join(left, in_money_year) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
 
 # Get total income paid to any one person which should have been collective pre/post LLC
 in_money_llc <- income %>%
   group_by(name = paid_to, llc) %>%
-  summarise(total_in = sum(usd, na.rm = TRUE))
+  summarise(total_in = sum(usd))
 in_money_llc <- left_join(left_llc, in_money_llc) %>% mutate(total_in = ifelse(is.na(total_in), 0, total_in))
 
 # Get wages paid and not yet reimbursed
 out_wages <- wages_paid %>%
   group_by(name) %>%
-  summarise(wages_paid = sum(usd, na.rm = TRUE))
+  summarise(wages_paid = sum(usd))
 out_wages <- left_join(names_df, out_wages) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
 
 # Get wages paid and not yet reimbursed BY YEAR
 out_wages_year <- wages_paid %>%
   group_by(name, year) %>%
-  summarise(wages_paid = sum(usd, na.rm = TRUE))
+  summarise(wages_paid = sum(usd))
 out_wages_year <- left_join(left, out_wages_year) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
 
 # Get wages paid and not yet reimbursed by pre/post llc
 out_wages_llc <- wages_paid %>%
   group_by(name, llc) %>%
-  summarise(wages_paid = sum(usd, na.rm = TRUE))
+  summarise(wages_paid = sum(usd))
 out_wages_llc <- left_join(left_llc, out_wages_llc) %>% mutate(wages_paid = ifelse(is.na(wages_paid), 0, wages_paid))
 
 # Join all together
@@ -548,7 +519,7 @@ together_reactive_llc <-  x_llc %>%
 bank_val <- round(dplyr::last(bank$usd), digits = 2)
 x <- together_reactive
 x <- x %>%
-  summarise(balance = sum(balance, na.rm = TRUE)) %>%
+  summarise(balance = sum(balance)) %>%
   mutate(balance_numeric = balance) %>%
   mutate(balance = paste0(balance, ifelse(balance > 0, ' in the red', ' in the black')))  %>%
   mutate(balance_bank = balance_numeric - bank_val) %>%
@@ -572,7 +543,7 @@ The below chart shows the cumulative number of hours worked for DataBrew over ti
 ```{r}
 x <- hours %>%
   group_by(date, name) %>%
-  summarise(hours = sum(total_hours, na.rm = TRUE)) %>%
+  summarise(hours = sum(total_hours)) %>%
   ungroup 
 left <- expand.grid(date = seq(min(x$date),
                                max(x$date),
@@ -617,7 +588,7 @@ The below shows the number of hours worked by calendar month.
 pd <- x %>%
   group_by(date = as.Date(cut(date, 'month')),
            name) %>%
-  summarise(hours = sum(hours, na.rm = TRUE)) %>%
+  summarise(hours = sum(hours)) %>%
   ungroup
 
 ggplot(data = pd,
@@ -699,13 +670,23 @@ show <- together_reactive_year %>%
   mutate(amount_earned_reimbursements = expenditures_absorbed) %>%
   dplyr::select(name, year, amount_paid, amount_earned_wages, amount_earned_reimbursements) %>%
   # Adjust amounts paid based on amounts already paid out
- mutate(owed = amount_earned_wages + amount_earned_reimbursements - amount_paid) %>%
+  mutate(paid_less_than_expenses = amount_paid < amount_earned_reimbursements) %>%
+  mutate(amount_paid_reimbursements = ifelse(paid_less_than_expenses, amount_paid, amount_earned_reimbursements)) %>%
+  mutate(amount_paid_wages = amount_paid - amount_paid_reimbursements) %>%
+  mutate(owed = amount_earned_wages + amount_earned_reimbursements - amount_paid_wages - amount_paid_reimbursements) %>%
+  dplyr::select(-paid_less_than_expenses) %>%
+  mutate(owed_wages = amount_earned_wages - amount_paid_wages) %>%
+  mutate(owed_reimbursements = amount_earned_reimbursements - amount_paid_reimbursements) %>%
   dplyr::select(Year = year,
                 Name = name,
               `Earned (wages)` = amount_earned_wages,
               `Earned (reimbursements)` = amount_earned_reimbursements,
                 Paid = amount_paid,
-               `Owed` = owed)
+                `Paid (wages)` = amount_paid_wages,
+                `Paid (reimbursements)` = amount_paid_reimbursements,
+               `Owed` = owed,
+                `Owed (wages)` = owed_wages,
+                `Owed (reimbursements)` = owed_reimbursements)
  
 
 # Total row
@@ -745,14 +726,23 @@ show <- together_reactive_llc %>%
   mutate(amount_earned_reimbursements = expenditures_absorbed) %>%
   dplyr::select(name, llc, amount_paid, amount_earned_wages, amount_earned_reimbursements) %>%
   # Adjust amounts paid based on amounts already paid out
- mutate(owed = amount_earned_wages + amount_earned_reimbursements - amount_paid) %>%
+  mutate(paid_less_than_expenses = amount_paid < amount_earned_reimbursements) %>%
+  mutate(amount_paid_reimbursements = ifelse(paid_less_than_expenses, amount_paid, amount_earned_reimbursements)) %>%
+  mutate(amount_paid_wages = amount_paid - amount_paid_reimbursements) %>%
+  mutate(owed = amount_earned_wages + amount_earned_reimbursements - amount_paid_wages - amount_paid_reimbursements) %>%
+  dplyr::select(-paid_less_than_expenses) %>%
+  mutate(owed_wages = amount_earned_wages - amount_paid_wages) %>%
+  mutate(owed_reimbursements = amount_earned_reimbursements - amount_paid_reimbursements) %>%
   dplyr::select(LLC = llc,
                 Name = name,
               `Earned (wages)` = amount_earned_wages,
               `Earned (reimbursements)` = amount_earned_reimbursements,
                 Paid = amount_paid,
-               `Owed` = owed)
- 
+                `Paid (wages)` = amount_paid_wages,
+                `Paid (reimbursements)` = amount_paid_reimbursements,
+              `Owed` = owed,
+                `Owed (wages)` = owed_wages,
+                `Owed (reimbursements)` = owed_reimbursements)
  
 
 # Total row
